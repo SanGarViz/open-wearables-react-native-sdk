@@ -26,53 +26,59 @@ jobs:
           cache: 'npm'
           cache-dependency-path: example/package-lock.json
 
-      - name: Instalar dependencias del SDK
+      - name: Instalar dependencias del SDK principal
         run: npm install
-
-      # 1. Clonar el SDK Nativo de Android en una carpeta fija dentro de 'example'
-      - name: Clonar SDK Nativo Android localmente
-        uses: actions/checkout@v4
-        with:
-          repository: 'the-momentum/open_wearables_android_sdk'
-          path: 'example/android/native-sdk'
 
       - name: Instalar dependencias de la app de ejemplo
         run: |
           cd example
           npm install
 
+      # 1. Clonar el SDK Nativo de Android directamente dentro de la estructura de node_modules/open-wearables/android
+      # O clonarlo y enlazarlo antes de que Gradle lo busque
+      - name: Clonar SDK Nativo Android
+        uses: actions/checkout@v4
+        with:
+          repository: 'the-momentum/open_wearables_android_sdk'
+          path: 'native-android-sdk'
+
       - name: Generar código nativo Android con Expo
         run: |
           cd example
           npx expo prebuild --platform android
 
-      # 2. Reemplazar la dependencia remota por el proyecto local en el gradle del módulo de React Native
-      - name: Vincular el SDK nativo localmente en Gradle
+      # 2. Parchear de forma garantizada el build.gradle de open-wearables ahora que node_modules existe
+      - name: Forzar enlace local del SDK nativo en open-wearables
         run: |
           python3 -c "
-          # Ajustar settings.gradle para incluir el módulo nativo
-          settings_path = 'example/android/settings.gradle'
-          with open(settings_path, 'r') as f:
-              settings_content = f.read()
-          
-          include_sdk = '\ninclude \":sdk\"\nproject(\":sdk\").projectDir = new File(\"$rootDir/native-sdk/sdk\")\n'
-          if ':sdk' not in settings_content:
-              settings_content += include_sdk
-              with open(settings_path, 'w') as f:
-                  f.write(settings_content)
+          import os
 
-          # Modificar la dependencia en el build.gradle de open-wearables para que use el proyecto local
-          build_gradle_path = 'node_modules/open-wearables/android/build.gradle'
-          try:
-              with open(build_gradle_path, 'r') as f:
+          # 1. Incluir el módulo sdk en settings.gradle de Android
+          settings_path = 'example/android/settings.gradle'
+          if os.path.exists(settings_path):
+              with open(settings_path, 'r') as f:
+                  content = f.read()
+              
+              include_snippet = '\ninclude \":sdk\"\nproject(\":sdk\").projectDir = new File(\"$rootDir/../../native-android-sdk/sdk\")\n'
+              if ':sdk' not in content:
+                  with open(settings_path, 'w') as f:
+                      f.write(content + include_snippet)
+
+          # 2. Reemplazar la dependencia remota por el proyecto local en node_modules/open-wearables/android/build.gradle
+          target_bg = 'node_modules/open-wearables/android/build.gradle'
+          if os.path.exists(target_bg):
+              with open(target_bg, 'r') as f:
                   bg_content = f.read()
-              # Cambiar implementation 'com.openwearables.health:sdk:...' por implementation project(':sdk')
+              
+              # Reemplazar la línea de la dependencia por project(':sdk')
               import re
-              bg_content = re.sub(r'implementation\s*[\"\x27]com\.openwearables\.health:sdk:.*?[\"\x27]', 'implementation project(\":sdk\")', bg_content)
-              with open(build_gradle_path, 'w') as f:
-                  f.write(bg_content)
-          except Exception as e:
-              print(f'Nota al parchear build.gradle: {e}')
+              new_content = re.sub(r'implementation\s*[\"\x27]com\.openwearables\.health:sdk:.*?[\"\x27]', 'implementation project(\":sdk\")', bg_content)
+              
+              with open(target_bg, 'w') as f:
+                  f.write(new_content)
+              print('Parche aplicado exitosamente en node_modules/open-wearables')
+          else:
+              print('Advertencia: No se encontró el archivo build.gradle de open-wearables en node_modules')
           "
 
       # 3. Compilar la APK de Release
