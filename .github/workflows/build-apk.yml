@@ -29,19 +29,12 @@ jobs:
       - name: Instalar dependencias del SDK
         run: npm install
 
-      # 1. Clonar el repositorio del SDK Nativo de Android de Open Wearables
-      - name: Clonar SDK Nativo Android
+      # 1. Clonar el SDK Nativo de Android en una carpeta fija dentro de 'example'
+      - name: Clonar SDK Nativo Android localmente
         uses: actions/checkout@v4
         with:
           repository: 'the-momentum/open_wearables_android_sdk'
-          path: 'native-android-sdk'
-
-      # 2. Publicar el SDK Nativo en el repositorio Maven Local
-      - name: Publicar SDK nativo en Maven Local
-        run: |
-          cd native-android-sdk
-          chmod +x gradlew
-          ./gradlew :sdk:publishReleasePublicationToMavenLocal
+          path: 'example/android/native-sdk'
 
       - name: Instalar dependencias de la app de ejemplo
         run: |
@@ -53,28 +46,36 @@ jobs:
           cd example
           npx expo prebuild --platform android
 
-      # 3. Inyección correcta de mavenLocal() al inicio de allprojects en build.gradle
-      - name: Agregar mavenLocal a los repositorios de Gradle
+      # 2. Reemplazar la dependencia remota por el proyecto local en el gradle del módulo de React Native
+      - name: Vincular el SDK nativo localmente en Gradle
         run: |
           python3 -c "
-          path = 'example/android/build.gradle'
-          with open(path, 'r') as f:
-              content = f.read()
+          # Ajustar settings.gradle para incluir el módulo nativo
+          settings_path = 'example/android/settings.gradle'
+          with open(settings_path, 'r') as f:
+              settings_content = f.read()
           
-          # Insertar mavenLocal() dentro de allprojects -> repositories
-          target = 'allprojects {\n    repositories {'
-          replacement = 'allprojects {\n    repositories {\n        mavenLocal()'
-          
-          if target in content:
-              content = content.replace(target, replacement, 1)
-          else:
-              # Fallback si cambia la estructura de espacios
-              content = content.replace('repositories {', 'repositories {\n        mavenLocal()', 1)
-              
-          with open(path, 'w') as f:
-              f.write(content)
+          include_sdk = '\ninclude \":sdk\"\nproject(\":sdk\").projectDir = new File(\"$rootDir/native-sdk/sdk\")\n'
+          if ':sdk' not in settings_content:
+              settings_content += include_sdk
+              with open(settings_path, 'w') as f:
+                  f.write(settings_content)
+
+          # Modificar la dependencia en el build.gradle de open-wearables para que use el proyecto local
+          build_gradle_path = 'node_modules/open-wearables/android/build.gradle'
+          try:
+              with open(build_gradle_path, 'r') as f:
+                  bg_content = f.read()
+              # Cambiar implementation 'com.openwearables.health:sdk:...' por implementation project(':sdk')
+              import re
+              bg_content = re.sub(r'implementation\s*[\"\x27]com\.openwearables\.health:sdk:.*?[\"\x27]', 'implementation project(\":sdk\")', bg_content)
+              with open(build_gradle_path, 'w') as f:
+                  f.write(bg_content)
+          except Exception as e:
+              print(f'Nota al parchear build.gradle: {e}')
           "
 
+      # 3. Compilar la APK de Release
       - name: Compilar APK de Release
         run: |
           cd example/android
