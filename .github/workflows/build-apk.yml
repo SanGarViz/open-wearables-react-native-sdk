@@ -1,0 +1,56 @@
+name: Build Open Wearables APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch: # Permite ejecutar la compilación manualmente
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout del código
+        uses: actions/checkout@v4
+
+      - name: Configurar Java JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: example/package-lock.json
+
+      - name: Instalar dependencias del SDK
+        run: npm install
+
+      - name: Instalar dependencias de la app de ejemplo
+        run: |
+          cd example
+          npm install
+
+      - name: Generar archivos nativos de Android (Expo Prebuild)
+        run: |
+          cd example
+          npx expo prebuild --platform android
+
+      - name: Conceder permisos a Gradle
+        run: |
+          cd example/android
+          chmod +x gradlew
+
+      - name: Compilar APK de Release con Gradle
+        run: |
+          cd example/android
+          ./gradlew assembleRelease --no-daemon
+
+      - name: Guardar la APK como artefacto de descarga
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenWearables-App-Release
+          path: example/android/app/build/outputs/apk/release/*.apk
