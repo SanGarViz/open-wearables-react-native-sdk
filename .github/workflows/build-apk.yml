@@ -36,7 +36,7 @@ jobs:
           repository: 'the-momentum/open_wearables_android_sdk'
           path: 'native-android-sdk'
 
-      # 2. Publicar correctamente el SDK nativo usando publishToMavenLocal dentro de su entorno
+      # 2. Publicar el SDK nativo en Maven Local
       - name: Compilar y publicar SDK nativo en Maven Local
         run: |
           cd native-android-sdk
@@ -53,29 +53,23 @@ jobs:
           cd example
           npx expo prebuild --platform android
 
-      # 3. Asegurar que mavenLocal() esté presente en los repositorios de la app de ejemplo
-      - name: Inyectar mavenLocal en el repositorio de Gradle de la app
+      # 3. Inyectar mavenLocal() explícitamente en el bloque build.gradle de la app generada por Expo
+      - name: Agregar mavenLocal en el build.gradle de Android
         run: |
           python3 -c "
-          settings_path = 'example/android/settings.gradle'
-          with open(settings_path, 'r') as f:
+          build_path = 'example/android/build.gradle'
+          with open(build_path, 'r') as f:
               content = f.read()
 
-          maven_local_repo = '''
-          dependencyResolutionManagement {
-              repositories {
-                  mavenLocal()
-                  google()
-                  mavenCentral()
-                  maven { url 'https://www.jitpack.io' }
-              }
-          }
-          '''
-          
-          # Si no usa dependencyResolutionManagement, lo añadimos o lo inyectamos
-          if 'dependencyResolutionManagement' not in content:
-              with open(settings_path, 'a') as f:
-                  f.write('\ndependencyResolutionManagement { repositories { mavenLocal(); google(); mavenCentral(); maven { url \"https://www.jitpack.io\" } } }\n')
+          # Inyectar mavenLocal() en el primer bloque 'repositories' que encuentre
+          target = 'repositories {'
+          if 'mavenLocal()' not in content:
+              new_content = content.replace(target, 'repositories {\n        mavenLocal()', 1)
+              with open(build_path, 'w') as f:
+                  f.write(new_content)
+              print('mavenLocal inyectado con éxito en build.gradle')
+          else:
+              print('mavenLocal ya estaba presente en build.gradle')
           "
 
       # 4. Compilar la APK de Release
