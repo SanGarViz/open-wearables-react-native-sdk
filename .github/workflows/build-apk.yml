@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout del código de la App
+      - name: Checkout del código principal
         uses: actions/checkout@v4
 
       - name: Configurar Java JDK 17
@@ -26,46 +26,36 @@ jobs:
           cache: 'npm'
           cache-dependency-path: example/package-lock.json
 
-      # --- NUEVO: Clonar y publicar el SDK Nativo de Android requeridos localmente ---
-      - name: Clonar el SDK Android nativo de Open Wearables
-        uses: actions/checkout@v4
-        with:
-          repository: 'the-momentum/open_wearables_android_sdk'
-          token: ${{ secrets.GITHUB_TOKEN }} # Opcional si es público, requerido si es privado
-          path: 'android-sdk-native'
+      - name: Instalar dependencias principales del SDK
+        run: npm install
 
-      - name: Publicar el SDK Android en Maven Local
+      # 1. Compilar y publicar el SDK Nativo de Android en Maven Local
+      - name: Publicar SDK nativo de Android localmente
         run: |
-          cd android-sdk-native
           chmod +x gradlew
           ./gradlew :sdk:publishReleasePublicationToMavenLocal
-
-      # --------------------------------------------------------------------------
-
-      - name: Instalar dependencias del SDK de React Native
-        run: npm install
 
       - name: Instalar dependencias de la app de ejemplo
         run: |
           cd example
           npm install
 
-      - name: Generar archivos nativos de Android (Expo Prebuild)
+      - name: Generar código nativo Android con Expo
         run: |
           cd example
           npx expo prebuild --platform android
 
-      - name: Conceder permisos a Gradle
+      - name: Dar permisos de ejecución a Gradle en la app
         run: |
           cd example/android
           chmod +x gradlew
 
-      - name: Compilar APK de Release con Gradle
+      - name: Compilar APK de Release
         run: |
           cd example/android
           ./gradlew assembleRelease --no-daemon
 
-      - name: Guardar la APK como artefacto de descarga
+      - name: Guardar la APK como artefacto
         uses: actions/upload-artifact@v4
         with:
           name: OpenWearables-App-Release
