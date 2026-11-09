@@ -29,19 +29,12 @@ jobs:
       - name: Instalar dependencias del SDK principal
         run: npm install
 
-      # 1. Clonar el SDK Nativo de Android de Open Wearables
+      # 1. Clonar el SDK Nativo de Android directamente dentro de la carpeta android de la app de ejemplo
       - name: Clonar SDK Nativo Android
         uses: actions/checkout@v4
         with:
           repository: 'the-momentum/open_wearables_android_sdk'
-          path: 'native-android-sdk'
-
-      # 2. Publicar el SDK nativo en Maven Local de la máquina virtual
-      - name: Publicar SDK nativo en Maven Local
-        run: |
-          cd native-android-sdk
-          chmod +x gradlew
-          ./gradlew :sdk:publishReleasePublicationToMavenLocal
+          path: 'example/android/native-sdk'
 
       - name: Instalar dependencias de la app de ejemplo
         run: |
@@ -53,25 +46,49 @@ jobs:
           cd example
           npx expo prebuild --platform android
 
-      # 3. Inyectar mavenLocal() de forma segura en el nivel raíz de repositories de gradle
-      - name: Configurar mavenLocal en repositories globales
+      # 2. Modificar settings.gradle e inyectar el módulo nativo directamente en la compilación
+      - name: Vincular el SDK nativo como submódulo local de Gradle
         run: |
           python3 -c "
-          import glob
-          
-          # Buscar archivos build.gradle o settings.gradle donde configurar repositorios
-          files = glob.glob('example/android/**/*.gradle', recursive=True) + glob.glob('example/android/*.gradle')
-          
-          for path in files:
-              with open(path, 'r') as f:
+          import os
+
+          # Añadir el proyecto :sdk al settings.gradle de Android
+          settings_path = 'example/android/settings.gradle'
+          if os.path.exists(settings_path):
+              with open(settings_path, 'r') as f:
                   content = f.read()
               
-              if 'repositories {' in content and 'mavenLocal()' not in content:
-                  # Agregar mavenLocal() al inicio de cada bloque repositories
-                  new_content = content.replace('repositories {', 'repositories {\n        mavenLocal()', 1)
-                  with open(path, 'w') as f:
-                      f.write(new_content)
-                  print(f'mavenLocal inyectado en: {path}')
+              include_snippet = '\ninclude \":sdk\"\nproject(\":sdk\").projectDir = new File(\"native-sdk/sdk\")\n'
+              if ':sdk' not in content:
+                  with open(settings_path, 'w') as f:
+                      f.write(content + include_snippet)
+                  print('Módulo :sdk añadido a settings.gradle')
+
+          # Reemplazar la dependencia remota en el build.gradle del paquete de npm si existe,
+          # o forzar la sustitución por el proyecto local.
+          "
+
+      # 3. Forzar a Gradle a usar el proyecto local mediante un dependency substitution global en build.gradle principal
+      - name: Forzar sustitución de dependencia por el proyecto local
+        run: |
+          python3 -c "
+          root_build_gradle = 'example/android/build.gradle'
+          with open(root_build_gradle, 'r') as f:
+              content = f.read()
+
+          substitution_block = '''
+          allprojects {
+              configurations.all {
+                  resolutionStrategy.dependencySubstitution {
+                      substitute module('com.openwearables.health:sdk') using project(':sdk')
+                  }
+              }
+          }
+          '''
+          
+          with open(root_build_gradle, 'a') as f:
+              f.write(substitution_block)
+          print('Estrategia de sustitución de dependencias inyectada correctamente.')
           "
 
       # 4. Compilar la APK de Release
