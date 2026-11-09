@@ -29,19 +29,12 @@ jobs:
       - name: Instalar dependencias del SDK principal
         run: npm install
 
-      # 1. Clonar el SDK Nativo de Android de Open Wearables
+      # 1. Clonar el SDK Nativo de Android directamente dentro de la carpeta android de la app de ejemplo
       - name: Clonar SDK Nativo Android
         uses: actions/checkout@v4
         with:
           repository: 'the-momentum/open_wearables_android_sdk'
-          path: 'native-android-sdk'
-
-      # 2. Publicar el SDK nativo en Maven Local
-      - name: Compilar y publicar SDK nativo en Maven Local
-        run: |
-          cd native-android-sdk
-          chmod +x gradlew
-          ./gradlew publishToMavenLocal
+          path: 'example/android/native-sdk'
 
       - name: Instalar dependencias de la app de ejemplo
         run: |
@@ -53,23 +46,54 @@ jobs:
           cd example
           npx expo prebuild --platform android
 
-      # 3. Inyectar mavenLocal() explícitamente en el bloque build.gradle de la app generada por Expo
-      - name: Agregar mavenLocal en el build.gradle de Android
+      # 2. Parchear settings.gradle para incluir el SDK nativo localmente como submódulo de Gradle
+      - name: Vincular módulo nativo en settings.gradle
         run: |
           python3 -c "
-          build_path = 'example/android/build.gradle'
-          with open(build_path, 'r') as f:
-              content = f.read()
+          import os
 
-          # Inyectar mavenLocal() en el primer bloque 'repositories' que encuentre
-          target = 'repositories {'
-          if 'mavenLocal()' not in content:
-              new_content = content.replace(target, 'repositories {\n        mavenLocal()', 1)
-              with open(build_path, 'w') as f:
-                  f.write(new_content)
-              print('mavenLocal inyectado con éxito en build.gradle')
+          settings_path = 'example/android/settings.gradle'
+          if os.path.exists(settings_path):
+              with open(settings_path, 'r') as f:
+                  content = f.read()
+              
+              include_snippet = '\ninclude \":sdk\"\nproject(\":sdk\").projectDir = new File(\"native-sdk/sdk\")\n'
+              if ':sdk' not in content:
+                  with open(settings_path, 'w') as f:
+                      f.write(content + include_snippet)
+                  print('Módulo :sdk añadido a settings.gradle con éxito.')
+          "
+
+      # 3. Parchear el archivo build.gradle del paquete open-wearables en node_modules 
+      # para reemplazar la dependencia remota por el proyecto local `:sdk`
+      - name: Reemplazar dependencia remota por el submódulo local
+        run: |
+          python3 -c "
+          import os
+          import glob
+
+          # Buscar el archivo build.gradle del paquete open-wearables dentro de node_modules
+          pattern = 'example/node_modules/open-wearables/android/build.gradle'
+          matches = glob.glob(pattern)
+
+          if not matches:
+              # Búsqueda alternativa si cambia la ruta exacta
+              matches = glob.glob('**/node_modules/open-wearables/android/build.gradle', recursive=True)
+
+          if matches:
+              target_file = matches[0]
+              with open(target_file, 'r') as f:
+                  code = f.read()
+              
+              # Reemplazar la línea de la dependencia implementation 'com.openwearables.health:sdk:...'
+              import re
+              new_code = re.sub(r'implementation\s*[\"\x27]com\.openwearables\.health:sdk:.*?[\"\x27]', 'implementation project(\":sdk\")', code)
+              
+              with open(target_file, 'w') as f:
+                  f.write(new_code)
+              print(f'Parche aplicado correctamente en: {target_file}')
           else:
-              print('mavenLocal ya estaba presente en build.gradle')
+              print('Aviso: No se encontró el archivo build.gradle de open-wearables en node_modules.')
           "
 
       # 4. Compilar la APK de Release
