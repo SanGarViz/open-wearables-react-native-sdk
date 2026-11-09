@@ -3,14 +3,14 @@ name: Build Open Wearables APK
 on:
   push:
     branches: [ main, master ]
-  workflow_dispatch: # Permite ejecutar la compilación manualmente
+  workflow_dispatch:
 
 jobs:
   build-android:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout del código
+      - name: Checkout del código de la App
         uses: actions/checkout@v4
 
       - name: Configurar Java JDK 17
@@ -26,7 +26,23 @@ jobs:
           cache: 'npm'
           cache-dependency-path: example/package-lock.json
 
-      - name: Instalar dependencias del SDK
+      # --- NUEVO: Clonar y publicar el SDK Nativo de Android requeridos localmente ---
+      - name: Clonar el SDK Android nativo de Open Wearables
+        uses: actions/checkout@v4
+        with:
+          repository: 'the-momentum/open_wearables_android_sdk'
+          token: ${{ secrets.GITHUB_TOKEN }} # Opcional si es público, requerido si es privado
+          path: 'android-sdk-native'
+
+      - name: Publicar el SDK Android en Maven Local
+        run: |
+          cd android-sdk-native
+          chmod +x gradlew
+          ./gradlew :sdk:publishReleasePublicationToMavenLocal
+
+      # --------------------------------------------------------------------------
+
+      - name: Instalar dependencias del SDK de React Native
         run: npm install
 
       - name: Instalar dependencias de la app de ejemplo
