@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout del código principal
+      - name: Checkout del código principal (SDK React Native)
         uses: actions/checkout@v4
 
       - name: Configurar Java JDK 17
@@ -26,32 +26,42 @@ jobs:
           cache: 'npm'
           cache-dependency-path: example/package-lock.json
 
-      - name: Instalar dependencias principales del SDK
+      - name: Instalar dependencias del SDK
         run: npm install
 
-      # 1. Instalar dependencias de la app de ejemplo primero
+      # 1. Clonar el repositorio del SDK Nativo de Android de Open Wearables
+      - name: Clonar SDK Nativo Android
+        uses: actions/checkout@v4
+        with:
+          repository: 'the-momentum/open_wearables_android_sdk'
+          path: 'native-android-sdk'
+
+      # 2. Publicar el SDK Nativo en el repositorio Maven Local de la máquina virtual
+      - name: Publicar SDK nativo en Maven Local
+        run: |
+          cd native-android-sdk
+          chmod +x gradlew
+          ./gradlew :sdk:publishReleasePublicationToMavenLocal
+
       - name: Instalar dependencias de la app de ejemplo
         run: |
           cd example
           npm install
 
-      # 2. Generar la estructura nativa de Android (aquí es donde se crea gradle/gradlew)
       - name: Generar código nativo Android con Expo
         run: |
           cd example
           npx expo prebuild --platform android
 
-      # 3. Compilar y publicar el SDK Nativo de Android usando el gradlew recién generado en example/android
-      - name: Publicar SDK nativo de Android en Maven Local
+      # 3. Forzar a Gradle a buscar en mavenLocal() asegurando la ruta de repositorios
+      - name: Inyectar repositorio mavenLocal en build.gradle
         run: |
-          cd example/android
-          chmod +x gradlew
-          ./gradlew :sdk:publishReleasePublicationToMavenLocal || true
+          echo "allprojects { repositories { mavenLocal() google() mavenCentral() } }" >> example/android/build.gradle
 
-      # 4. Compilar la APK final de Release
       - name: Compilar APK de Release
         run: |
           cd example/android
+          chmod +x gradlew
           ./gradlew assembleRelease --no-daemon
 
       - name: Guardar la APK como artefacto
