@@ -36,7 +36,7 @@ jobs:
           repository: 'the-momentum/open_wearables_android_sdk'
           path: 'native-android-sdk'
 
-      # 2. Publicar el SDK Nativo en el repositorio Maven Local de la máquina virtual
+      # 2. Publicar el SDK Nativo en el repositorio Maven Local
       - name: Publicar SDK nativo en Maven Local
         run: |
           cd native-android-sdk
@@ -53,10 +53,27 @@ jobs:
           cd example
           npx expo prebuild --platform android
 
-      # 3. Forzar a Gradle a buscar en mavenLocal() asegurando la ruta de repositorios
-      - name: Inyectar repositorio mavenLocal en build.gradle
+      # 3. Inyección correcta de mavenLocal() al inicio de allprojects en build.gradle
+      - name: Agregar mavenLocal a los repositorios de Gradle
         run: |
-          echo "allprojects { repositories { mavenLocal() google() mavenCentral() } }" >> example/android/build.gradle
+          python3 -c "
+          path = 'example/android/build.gradle'
+          with open(path, 'r') as f:
+              content = f.read()
+          
+          # Insertar mavenLocal() dentro de allprojects -> repositories
+          target = 'allprojects {\n    repositories {'
+          replacement = 'allprojects {\n    repositories {\n        mavenLocal()'
+          
+          if target in content:
+              content = content.replace(target, replacement, 1)
+          else:
+              # Fallback si cambia la estructura de espacios
+              content = content.replace('repositories {', 'repositories {\n        mavenLocal()', 1)
+              
+          with open(path, 'w') as f:
+              f.write(content)
+          "
 
       - name: Compilar APK de Release
         run: |
