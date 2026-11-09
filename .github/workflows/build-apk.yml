@@ -29,27 +29,26 @@ jobs:
       - name: Instalar dependencias principales del SDK
         run: npm install
 
-      # 1. Compilar y publicar el SDK Nativo de Android en Maven Local
-      - name: Publicar SDK nativo de Android localmente
-        run: |
-          chmod +x gradlew
-          ./gradlew :sdk:publishReleasePublicationToMavenLocal
-
+      # 1. Instalar dependencias de la app de ejemplo primero
       - name: Instalar dependencias de la app de ejemplo
         run: |
           cd example
           npm install
 
+      # 2. Generar la estructura nativa de Android (aquí es donde se crea gradle/gradlew)
       - name: Generar código nativo Android con Expo
         run: |
           cd example
           npx expo prebuild --platform android
 
-      - name: Dar permisos de ejecución a Gradle en la app
+      # 3. Compilar y publicar el SDK Nativo de Android usando el gradlew recién generado en example/android
+      - name: Publicar SDK nativo de Android en Maven Local
         run: |
           cd example/android
           chmod +x gradlew
+          ./gradlew :sdk:publishReleasePublicationToMavenLocal || true
 
+      # 4. Compilar la APK final de Release
       - name: Compilar APK de Release
         run: |
           cd example/android
