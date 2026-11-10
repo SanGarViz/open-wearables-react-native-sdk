@@ -48,8 +48,8 @@ jobs:
           cd example
           npx expo prebuild --platform android
 
-      # 4. Script universal en Python para vincular el SDK nativo y parchear node_modules automáticamente
-      - name: Vincular submódulo nativo y parchear dependencias
+      # 4. Vincular el submódulo y configurar la compatibilidad de variantes en Gradle
+      - name: Vincular submódulo nativo y ajustar variantes de Gradle
         run: |
           python3 -c "
           import os
@@ -68,23 +68,41 @@ jobs:
                       f.write(content + include_snippet)
                   print('Módulo :sdk añadido a settings.gradle con éxito.')
 
-          # B. Buscar en TODOS los .gradle de node_modules la dependencia remota y reemplazarla por el proyecto local
+          # B. Buscar y reemplazar la dependencia remota en node_modules
           gradle_files = glob.glob('example/node_modules/**/*.gradle', recursive=True)
-          patched_count = 0
-
           for path in gradle_files:
               with open(path, 'r', errors='ignore') as f:
                   code = f.read()
               
               if 'com.openwearables.health:sdk' in code:
-                  # Reemplazar cualquier variante de implementation o api que pida el sdk remoto
                   new_code = re.sub(r'[\w\s]*[\"\x27]com\.openwearables\.health:sdk:.*?[\"\x27]', ' implementation project(\":sdk\")', code)
                   with open(path, 'w') as f:
                       f.write(new_code)
-                  print(f'Parche aplicado exitosamente en: {path}')
-                  patched_count += 1
+                  print(f'Parche aplicado en node_modules: {path}')
 
-          print(f'Total de archivos parcheados en node_modules: {patched_count}')
+          # C. Añadir regla de compatibilidad de atributos en build.gradle para evitar el error de variantes
+          build_gradle_path = 'example/android/build.gradle'
+          if os.path.exists(build_gradle_path):
+              with open(build_gradle_path, 'r') as f:
+                  bg_content = f.read()
+
+              compatibility_rule = '''
+              subprojects {
+                  afterEvaluate { project ->
+                      if (project.hasProperty('android')) {
+                          project.android {
+                              if (namespace == null) {
+                                  namespace project.group
+                              }
+                          }
+                      }
+                  }
+              }
+              '''
+              if 'subprojects {' not in bg_content:
+                  with open(build_gradle_path, 'a') as f:
+                      f.write(compatibility_rule)
+                  print('Regla de compatibilidad añadida a build.gradle')
           "
 
       # 5. Compilar la APK de Release con Gradle
