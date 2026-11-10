@@ -36,51 +36,49 @@ jobs:
           repository: 'the-momentum/open_wearables_android_sdk'
           path: 'native-android-sdk'
 
-      # 2. Publicar el SDK nativo en el repositorio local (Maven Local)
+      # 2. Publicar el SDK nativo en Maven Local de la máquina virtual
       - name: Publicar SDK nativo en Maven Local
         run: |
           cd native-android-sdk
           chmod +x gradlew
           ./gradlew publishToMavenLocal
 
-      # 3. Instalar dependencias de la app de ejemplo
       - name: Instalar dependencias de la app de ejemplo
         run: |
           cd example
           npm install
 
-      # 4. Generar la estructura nativa con Expo
       - name: Generar código nativo Android con Expo
         run: |
           cd example
           npx expo prebuild --platform android
 
-      # 5. Inyectar mavenLocal() correctamente en settings.gradle
-      - name: Configurar mavenLocal en settings.gradle
+      # 3. Inyectar mavenLocal() dentro de dependencyResolutionManagement en settings.gradle
+      - name: Configurar mavenLocal en dependencyResolutionManagement
         run: |
           python3 -c "
           settings_path = 'example/android/settings.gradle'
           with open(settings_path, 'r') as f:
               content = f.read()
 
-          # Inyectar mavenLocal al inicio del bloque repositories existente
-          if 'repositories {' in content and 'mavenLocal()' not in content:
+          # Inyectar mavenLocal() de forma segura dentro de dependencyResolutionManagement -> repositories
+          if 'dependencyResolutionManagement' in content and 'mavenLocal()' not in content:
               content = content.replace('repositories {', 'repositories {\n        mavenLocal()', 1)
               with open(settings_path, 'w') as f:
                   f.write(content)
-              print('mavenLocal inyectado con éxito en settings.gradle')
+              print('mavenLocal inyectado correctamente en dependencyResolutionManagement')
           else:
-              print('mavenLocal ya estaba configurado o no se encontró repositories')
+              print('mavenLocal ya estaba presente o no se encontró dependencyResolutionManagement')
           "
 
-      # 6. Compilar la APK de Release con Gradle
+      # 4. Compilar la APK de Release con Gradle
       - name: Compilar APK de Release
         run: |
           cd example/android
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon
 
-      # 7. Guardar la APK generada como artefacto descargable
+      # 5. Guardar la APK generada como artefacto descargable
       - name: Guardar la APK como artefacto
         uses: actions/upload-artifact@v4
         with:
