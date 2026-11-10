@@ -29,90 +29,58 @@ jobs:
       - name: Instalar dependencias del SDK principal
         run: npm install
 
-      # 1. Clonar el SDK Nativo de Android directamente dentro de la carpeta android de la app de ejemplo
+      # 1. Clonar el SDK Nativo de Android
       - name: Clonar SDK Nativo Android
         uses: actions/checkout@v4
         with:
           repository: 'the-momentum/open_wearables_android_sdk'
-          path: 'example/android/native-sdk'
+          path: 'native-android-sdk'
 
-      # 2. Instalar dependencias de la app de ejemplo
+      # 2. Publicar el SDK nativo en el repositorio local (Maven Local)
+      - name: Publicar SDK nativo en Maven Local
+        run: |
+          cd native-android-sdk
+          chmod +x gradlew
+          ./gradlew publishToMavenLocal
+
+      # 3. Instalar dependencias de la app de ejemplo
       - name: Instalar dependencias de la app de ejemplo
         run: |
           cd example
           npm install
 
-      # 3. Generar la estructura nativa con Expo
+      # 4. Generar la estructura nativa con Expo
       - name: Generar código nativo Android con Expo
         run: |
           cd example
           npx expo prebuild --platform android
 
-      # 4. Vincular el submódulo y configurar la compatibilidad de variantes en Gradle
-      - name: Vincular submódulo nativo y ajustar variantes de Gradle
+      # 5. Inyectar mavenLocal() correctamente en settings.gradle
+      - name: Configurar mavenLocal en settings.gradle
         run: |
           python3 -c "
-          import os
-          import glob
-          import re
-
-          # A. Añadir el proyecto :sdk al settings.gradle de Android
           settings_path = 'example/android/settings.gradle'
-          if os.path.exists(settings_path):
-              with open(settings_path, 'r') as f:
-                  content = f.read()
-              
-              include_snippet = '\ninclude \":sdk\"\nproject(\":sdk\").projectDir = new File(\"native-sdk/sdk\")\n'
-              if ':sdk' not in content:
-                  with open(settings_path, 'w') as f:
-                      f.write(content + include_snippet)
-                  print('Módulo :sdk añadido a settings.gradle con éxito.')
+          with open(settings_path, 'r') as f:
+              content = f.read()
 
-          # B. Buscar y reemplazar la dependencia remota en node_modules
-          gradle_files = glob.glob('example/node_modules/**/*.gradle', recursive=True)
-          for path in gradle_files:
-              with open(path, 'r', errors='ignore') as f:
-                  code = f.read()
-              
-              if 'com.openwearables.health:sdk' in code:
-                  new_code = re.sub(r'[\w\s]*[\"\x27]com\.openwearables\.health:sdk:.*?[\"\x27]', ' implementation project(\":sdk\")', code)
-                  with open(path, 'w') as f:
-                      f.write(new_code)
-                  print(f'Parche aplicado en node_modules: {path}')
-
-          # C. Añadir regla de compatibilidad de atributos en build.gradle para evitar el error de variantes
-          build_gradle_path = 'example/android/build.gradle'
-          if os.path.exists(build_gradle_path):
-              with open(build_gradle_path, 'r') as f:
-                  bg_content = f.read()
-
-              compatibility_rule = '''
-              subprojects {
-                  afterEvaluate { project ->
-                      if (project.hasProperty('android')) {
-                          project.android {
-                              if (namespace == null) {
-                                  namespace project.group
-                              }
-                          }
-                      }
-                  }
-              }
-              '''
-              if 'subprojects {' not in bg_content:
-                  with open(build_gradle_path, 'a') as f:
-                      f.write(compatibility_rule)
-                  print('Regla de compatibilidad añadida a build.gradle')
+          # Inyectar mavenLocal al inicio del bloque repositories existente
+          if 'repositories {' in content and 'mavenLocal()' not in content:
+              content = content.replace('repositories {', 'repositories {\n        mavenLocal()', 1)
+              with open(settings_path, 'w') as f:
+                  f.write(content)
+              print('mavenLocal inyectado con éxito en settings.gradle')
+          else:
+              print('mavenLocal ya estaba configurado o no se encontró repositories')
           "
 
-      # 5. Compilar la APK de Release con Gradle
+      # 6. Compilar la APK de Release con Gradle
       - name: Compilar APK de Release
         run: |
           cd example/android
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon
 
-      # 6. Guardar la APK generada como artefacto descargable
+      # 7. Guardar la APK generada como artefacto descargable
       - name: Guardar la APK como artefacto
         uses: actions/upload-artifact@v4
         with:
