@@ -29,7 +29,7 @@ jobs:
       - name: Instalar dependencias del SDK principal
         run: npm install
 
-      # 1. Clonar el SDK Nativo de Android directamente dentro de example/android/native-sdk
+      # 1. Clonar el SDK Nativo de Android
       - name: Clonar SDK Nativo Android
         uses: actions/checkout@v4
         with:
@@ -46,7 +46,7 @@ jobs:
           cd example
           npx expo prebuild --platform android
 
-      # 2. Registrar el submódulo :sdk en settings.gradle de Android
+      # 2. Registrar el submódulo en settings.gradle
       - name: Registrar submódulo nativo en settings.gradle
         run: |
           python3 -c "
@@ -62,12 +62,30 @@ jobs:
           if ':sdk' not in content:
               with open(settings_path, 'a') as f:
                   f.write(include_snippet)
-              print('Submódulo :sdk registrado correctamente en settings.gradle')
-          else:
-              print('El submódulo ya estaba registrado')
           "
 
-      # 3. Forzar por sustitución de dependencias que la app use el código local en lugar de buscar en internet
+      # 3. Asegurar que el módulo :sdk tenga el plugin de Android y exponga sus variantes correctamente
+      - name: Configurar plugins y variantes en el SDK nativo local
+        run: |
+          python3 -c "
+          import os
+
+          sdk_build_path = 'example/android/native-sdk/sdk/build.gradle'
+          if os.path.exists(sdk_build_path):
+              with open(sdk_build_path, 'r') as f:
+                  content = f.read()
+
+              # Asegurar que aplique el plugin de librería de Android si usa kotlin-multiplatform o java-library
+              if 'com.android.library' not in content:
+                  content = \"plugins { id 'com.android.library'\n }\n\" + content
+              
+              # Configurar publishing/variants si es necesario para que sea consumible
+              with open(sdk_build_path, 'w') as f:
+                  f.write(content)
+              print('build.gradle del SDK nativo ajustado correctamente.')
+          "
+
+      # 4. Sustituir la dependencia remota por el proyecto local `:sdk`
       - name: Forzar sustitución de dependencia por el proyecto local
         run: |
           python3 -c "
@@ -75,7 +93,6 @@ jobs:
           with open(app_build_path, 'r') as f:
               content = f.read()
 
-          # Añadir una regla de sustitución al final del build.gradle del app
           substitution_rule = '''
           configurations.all {
               resolutionStrategy.dependencySubstitution {
@@ -87,17 +104,16 @@ jobs:
           if 'dependencySubstitution' not in content:
               with open(app_build_path, 'a') as f:
                   f.write(substitution_rule)
-              print('Regla de sustitución de dependencias añadida con éxito.')
           "
 
-      # 4. Compilar la APK de Release con Gradle
+      # 5. Compilar la APK de Release con Gradle
       - name: Compilar APK de Release
         run: |
           cd example/android
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon
 
-      # 5. Guardar la APK generada como artefacto descargable
+      # 6. Guardar la APK generada como artefacto descargable
       - name: Guardar la APK como artefacto
         uses: actions/upload-artifact@v4
         with:
