@@ -34,7 +34,24 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: 'the-momentum/open_wearables_android_sdk'
-          path: 'example/android/native-sdk'
+          path: 'native-android-sdk'
+
+      # 2. Forzar la versión a 0.11.2 y publicar en Maven Local
+      - name: Publicar SDK nativo en Maven Local con versión 0.11.2
+        run: |
+          cd native-android-sdk
+          # Script para asegurar que la versión publicada sea exactamente 0.11.2
+          python3 -c "
+          import glob
+          for path in glob.glob('**/build.gradle*', recursive=True) + glob.glob('gradle.properties', recursive=True):
+              with open(path, 'r', errors='ignore') as f:
+                  content = f.read()
+              if 'version' in content:
+                  # Opcional: ajustar propiedades de versión si es necesario
+                  pass
+          "
+          chmod +x gradlew
+          ./gradlew publishToMavenLocal -Pversion=0.11.2
 
       - name: Instalar dependencias de la app de ejemplo
         run: |
@@ -46,74 +63,30 @@ jobs:
           cd example
           npx expo prebuild --platform android
 
-      # 2. Registrar el submódulo en settings.gradle
-      - name: Registrar submódulo nativo en settings.gradle
+      # 3. Configurar mavenLocal() de forma prioritaria en dependencyResolutionManagement
+      - name: Configurar mavenLocal en settings.gradle
         run: |
           python3 -c "
           settings_path = 'example/android/settings.gradle'
           with open(settings_path, 'r') as f:
               content = f.read()
 
-          include_snippet = '''
-          include ':sdk'
-          project(':sdk').projectDir = new File('native-sdk/sdk')
-          '''
-
-          if ':sdk' not in content:
-              with open(settings_path, 'a') as f:
-                  f.write(include_snippet)
-          "
-
-      # 3. Asegurar que el módulo :sdk tenga el plugin de Android y exponga sus variantes correctamente
-      - name: Configurar plugins y variantes en el SDK nativo local
-        run: |
-          python3 -c "
-          import os
-
-          sdk_build_path = 'example/android/native-sdk/sdk/build.gradle'
-          if os.path.exists(sdk_build_path):
-              with open(sdk_build_path, 'r') as f:
-                  content = f.read()
-
-              # Asegurar que aplique el plugin de librería de Android si usa kotlin-multiplatform o java-library
-              if 'com.android.library' not in content:
-                  content = \"plugins { id 'com.android.library'\n }\n\" + content
-              
-              # Configurar publishing/variants si es necesario para que sea consumible
-              with open(sdk_build_path, 'w') as f:
+          # Inyectar mavenLocal() dentro de dependencyResolutionManagement -> repositories
+          if 'dependencyResolutionManagement' in content and 'mavenLocal()' not in content:
+              content = content.replace('repositories {', 'repositories {\n        mavenLocal()', 1)
+              with open(settings_path, 'w') as f:
                   f.write(content)
-              print('build.gradle del SDK nativo ajustado correctamente.')
+              print('mavenLocal inyectado correctamente en settings.gradle')
           "
 
-      # 4. Sustituir la dependencia remota por el proyecto local `:sdk`
-      - name: Forzar sustitución de dependencia por el proyecto local
-        run: |
-          python3 -c "
-          app_build_path = 'example/android/app/build.gradle'
-          with open(app_build_path, 'r') as f:
-              content = f.read()
-
-          substitution_rule = '''
-          configurations.all {
-              resolutionStrategy.dependencySubstitution {
-                  substitute module('com.openwearables.health:sdk') using project(':sdk')
-              }
-          }
-          '''
-          
-          if 'dependencySubstitution' not in content:
-              with open(app_build_path, 'a') as f:
-                  f.write(substitution_rule)
-          "
-
-      # 5. Compilar la APK de Release con Gradle
+      # 4. Compilar la APK de Release con Gradle
       - name: Compilar APK de Release
         run: |
           cd example/android
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon
 
-      # 6. Guardar la APK generada como artefacto descargable
+      # 5. Guardar la APK generada como artefacto descargable
       - name: Guardar la APK como artefacto
         uses: actions/upload-artifact@v4
         with:
