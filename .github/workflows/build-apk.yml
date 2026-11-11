@@ -36,23 +36,16 @@ jobs:
           repository: 'the-momentum/open_wearables_android_sdk'
           path: 'native-android-sdk'
 
-      # 2. Forzar la versión a 0.11.2 y publicar en Maven Local
-      - name: Publicar SDK nativo en Maven Local con versión 0.11.2
+      # 2. Publicar el SDK nativo en un repositorio local dentro del proyecto (evita el aislamiento de ~/.m2)
+      - name: Publicar SDK nativo en repositorio local del proyecto
         run: |
           cd native-android-sdk
-          # Script para asegurar que la versión publicada sea exactamente 0.11.2
-          python3 -c "
-          import glob
-          for path in glob.glob('**/build.gradle*', recursive=True) + glob.glob('gradle.properties', recursive=True):
-              with open(path, 'r', errors='ignore') as f:
-                  content = f.read()
-              if 'version' in content:
-                  # Opcional: ajustar propiedades de versión si es necesario
-                  pass
-          "
+          # Configurar la ruta del repositorio local dentro de example/android/local-repo
+          LOCAL_REPO="../example/android/local-repo"
           chmod +x gradlew
-          ./gradlew publishToMavenLocal -Pversion=0.11.2
+          ./gradlew publish -Pversion=0.11.2 -PmavenRepoPath="$LOCAL_REPO" || ./gradlew publishToMavenLocal
 
+      # 3. Instalar dependencias de la app de ejemplo
       - name: Instalar dependencias de la app de ejemplo
         run: |
           cd example
@@ -63,30 +56,47 @@ jobs:
           cd example
           npx expo prebuild --platform android
 
-      # 3. Configurar mavenLocal() de forma prioritaria en dependencyResolutionManagement
-      - name: Configurar mavenLocal en settings.gradle
+      # 4. Configurar el repositorio local personalizado en settings.gradle de la app
+      - name: Registrar repositorio local en settings.gradle
         run: |
           python3 -c "
           settings_path = 'example/android/settings.gradle'
           with open(settings_path, 'r') as f:
               content = f.read()
 
-          # Inyectar mavenLocal() dentro de dependencyResolutionManagement -> repositories
-          if 'dependencyResolutionManagement' in content and 'mavenLocal()' not in content:
-              content = content.replace('repositories {', 'repositories {\n        mavenLocal()', 1)
+          # Añadir el repositorio local de archivos al bloque dependencyResolutionManagement
+          custom_repo = '''
+          dependencyResolutionManagement {
+              repositories {
+                  maven { url uri('./local-repo') }
+                  mavenLocal()
+                  google()
+                  mavenCentral()
+                  maven { url 'https://www.jitpack.io' }
+              }
+          }
+          '''
+
+          if 'dependencyResolutionManagement' in content:
+              # Reemplazar el bloque existente de repositories o inyectarlo
+              import re
+              new_content = re.sub(r'repositories\s*\{([^}]*)\}', 'repositories {\n        maven { url uri(\'./local-repo\') }\n\\1\n    }', content, count=1)
               with open(settings_path, 'w') as f:
-                  f.write(content)
-              print('mavenLocal inyectado correctamente en settings.gradle')
+                  f.write(new_content)
+          else:
+              with open(settings_path, 'a') as f:
+                  f.write(custom_repo)
+          print('Repositorio local configurado con éxito en settings.gradle')
           "
 
-      # 4. Compilar la APK de Release con Gradle
+      # 5. Compilar la APK de Release con Gradle
       - name: Compilar APK de Release
         run: |
           cd example/android
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon
 
-      # 5. Guardar la APK generada como artefacto descargable
+      # 6. Guardar la APK generada como artefacto descargable
       - name: Guardar la APK como artefacto
         uses: actions/upload-artifact@v4
         with:
